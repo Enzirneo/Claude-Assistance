@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccwatch</title>
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub">
+<div class="top">
+  <span class="dot" id="conn" title="conexão com o servidor"></span>
+  <span class="brand">cc<b>watch</b></span>
+  <span class="acct" id="acct"></span>
+  <span class="sp"></span>
+  <input type="search" id="q" placeholder="buscar…">
+</div>
+<div class="strip lims" id="limits"></div>
+<div class="cols">
+  <span></span><span>Chat <span id="count"></span></span><span class="p">Projeto</span><span>Contexto</span>
+  <span class="r t">Tokens</span><span class="m">Modelo</span><span class="s" title="↑ entrada nova · c leitura de cache · ↓ saída">Gasto ↑ c ↓</span><span class="r">Ativ.</span>
+</div>
+<div id="list"></div>
+<div class="empty" id="empty" hidden></div>
+
+<script src="common.js"></script>
+<script>
+const list = $("#list"), rows = new Map();
+let data = null, order = "", filter = "";
+
+$("#q").addEventListener("input", (e) => { filter = e.target.value.trim().toLowerCase(); render(); });
+list.addEventListener("click", (e) => {
+  const row = e.target.closest(".row-chat");
+  if (row) openWindow(row.dataset.id);
+});
+
+function rowHtml(c, now) {
+  const x = c.ctx, p = x.pct, idle = now - c.mtime;
+  const t = c.totals;
+  return `
+    <span class="dot ${idle < 90 ? "live" : ""}"></span>
+    <span class="name" title="${esc(c.title)}\n${esc(c.cwd)}">${esc(c.title)}</span>
+    <span class="proj" title="${esc(c.cwd)}">${esc(c.cwd.split(/[\\/]/).filter(Boolean).pop() || c.cwd)}</span>
+    <span class="ctx ${state(p, 60, 80)}"><span class="bar"><i style="width:${Math.min(100, p)}%"></i></span><span class="pct">${p.toFixed(0)}%</span></span>
+    <span class="tok num r">${k(x.used)}<i class="faint">/${k(x.limit)}</i></span>
+    <span class="model">${esc(modelName(x))}</span>
+    <span class="spend num"><i>↑</i><b>${k(t.new_in)}</b><i>c</i><b>${k(t.cache_read)}</b><i>↓</i><b>${k(t.out)}</b></span>
+    <span class="muted num r">${ago(idle)}</span>`;
+}
+
+function render() {
+  if (!data) return;
+  const { chats, now, account, usage } = data;
+  $("#acct").textContent = account.email;
+  $("#limits").innerHTML = limitsInline(usage) + `<span class="faint" style="margin-left:auto;font-size:11px">${esc(usageNote(usage))}</span>`;
+
+  const shown = chats.filter((c) => !filter || (c.title + " " + c.cwd).toLowerCase().includes(filter));
+  const alerts = chats.filter((c) => c.ctx.pct >= 80).length;
+  $("#count").textContent = `· ${shown.length}` + (alerts ? ` · ${alerts} ≥80%` : "");
+
+  const seen = new Set();
+  for (const c of shown) {
+    seen.add(c.id);
+    let el = rows.get(c.id);
+    if (!el) { el = document.createElement("div"); el.className = "row-chat"; el.dataset.id = c.id; rows.set(c.id, el); }
+    const html = rowHtml(c, now);
+    if (el._html !== html) { el.innerHTML = html; el._html = html; }
+    el.classList.toggle("alert", c.ctx.pct >= 80);
+  }
+  for (const [id, el] of rows) if (!seen.has(id)) { el.remove(); rows.delete(id); }
+
+  const newOrder = shown.map((c) => c.id).join();
+  if (newOrder !== order) { order = newOrder; shown.forEach((c) => list.appendChild(rows.get(c.id))); }
+
+  const empty = $("#empty");
+  empty.hidden = shown.length > 0;
+  empty.textContent = !data.ready ? "Lendo conversas…" : chats.length ? "Nenhum chat bate com a busca." : "Nenhum chat encontrado em ~/.claude/projects";
+}
+
+async function tick() {
+  try { data = await api("/api/chats"); $("#conn").className = "dot live"; render(); }
+  catch { $("#conn").className = "dot off"; }
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

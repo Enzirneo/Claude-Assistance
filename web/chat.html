@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccwatch</title>
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="chat">
+<main id="main">
+  <header class="ttl">
+    <div class="ttl-text">
+      <h1 id="title">…</h1>
+    </div>
+    <span class="dot" id="conn"></span>
+  </header>
+
+  <!-- 1. CONTEXTO -->
+  <section class="blk" id="b-ctx">
+    <h2><span>Contexto</span><span class="pill" id="ctx-pill"></span></h2>
+    <div class="hero">
+      <div class="big" id="ctx-pct"></div>
+      <div class="hero-side">
+        <div class="main" id="ctx-used"></div>
+        <div class="sub2" id="ctx-free"></div>
+      </div>
+    </div>
+    <div class="meter"><i id="fill"></i><u style="left:60%"></u><u style="left:80%"></u></div>
+    <div class="foot"><span>Último turno</span><span id="ctx-last"></span></div>
+  </section>
+
+  <!-- 2. LIMITES DO PLANO -->
+  <section class="blk" id="b-plan">
+    <h2><span>Limites do plano</span><span class="pill" id="plan-pill"></span></h2>
+    <div id="plan"></div>
+    <div class="note" id="plan-note"></div>
+  </section>
+
+  <!-- 3. CONTA E MODELO -->
+  <section class="blk neutral" id="b-acct">
+    <h2><span>Conta e modelo</span></h2>
+    <dl class="info">
+      <dt>Conta</dt><dd id="acct-email"></dd>
+      <dt>Modelo</dt><dd id="model-name"></dd>
+      <dt>Esforço</dt><dd id="model-effort"></dd>
+    </dl>
+  </section>
+
+  <!-- 4. VEREDITO -->
+  <section class="blk" id="b-verdict">
+    <h2><span>Veredito</span><span class="pill" id="verdict-pill"></span></h2>
+    <div id="verdict"></div>
+  </section>
+</main>
+
+<script src="common.js"></script>
+<script>
+const id = new URLSearchParams(location.search).get("id");
+const RANK = { ok: 0, warn: 1, bad: 2 };
+const ICON = { ok: "✓", warn: "!", bad: "✕" };
+const PILL_CTX = { ok: "OK", warn: "ATENÇÃO", bad: "PARE" };
+const PILL_PLAN = { ok: "OK", warn: "SUBINDO", bad: "NO FIM" };
+
+function verdict(cpct, upct, free) {
+  const heavy = cpct < 65 && upct < 75 && free > 120000;
+  return [
+    cpct >= 80 ? ["bad", "PARE. Renove o contexto (/compact ou chat novo)."]
+      : cpct >= 60 ? ["warn", "Contexto cheio pela metade. Planeje renovar em breve."]
+      : ["ok", "Contexto OK. Pode seguir."],
+    upct >= 90 ? ["bad", "Limite do plano quase no fim. Espere o reset."]
+      : upct >= 70 ? ["warn", "Limite do plano subindo. Evite tarefa pesada."]
+      : ["ok", "Limite do plano OK."],
+    heavy ? ["ok", "Tarefa pesada: PODE."] : ["warn", "Tarefa pesada: NÃO agora."],
+  ];
+}
+
+function clock(iso) {
+  const t = new Date(iso);
+  if (isNaN(t)) return "";
+  const far = t - Date.now() > 86400000;
+  return t.toLocaleString("pt-BR", far
+    ? { weekday: "short", hour: "2-digit", minute: "2-digit" }
+    : { hour: "2-digit", minute: "2-digit" }).replace(/[.,]/g, "");
+}
+
+const worstOf = (states) => states.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "ok");
+function setState(el, s) { el.classList.remove("ok", "warn", "bad"); if (s) el.classList.add(s); }
+
+function render(d) {
+  const c = d.chat, x = c.ctx, p = x.pct, u = d.usage, a = d.account;
+
+  // cabeçalho: nome do chat + conta
+  $("#title").textContent = c.title;
+  $("#title").title = c.title + "\n" + c.cwd;
+
+  // 1. contexto
+  const cs = state(p, 60, 80);
+  setState($("#b-ctx"), cs);
+  $("#ctx-pill").textContent = PILL_CTX[cs];
+  $("#ctx-pct").innerHTML = `${p.toFixed(0)}<small>%</small>`;
+  $("#fill").style.width = Math.min(100, p) + "%";
+  $("#ctx-used").innerHTML = `<b>${k(x.used)}</b> <span>de ${k(x.limit)} tokens</span>`;
+  $("#ctx-free").innerHTML = `livre <b>${k(Math.max(0, x.limit - x.used))}</b>`;
+  const ago_ = x.last_ts ? " · " + ago((Date.now() - new Date(x.last_ts).getTime()) / 1000) + " atrás" : "";
+  $("#ctx-last").innerHTML = `<b>+${k(x.last_new)}</b> in · <b>${k(x.last_out)}</b> out<span class="faint">${ago_}</span>`;
+
+  // 2. limites do plano
+  const ps = u.windows.map((w) => state(w.pct, 70, 90));
+  const worst = Math.max(0, ...u.windows.map((w) => w.pct));
+  const planState = u.windows.length ? worstOf(ps) : "";
+  setState($("#b-plan"), planState);
+  $("#plan-pill").textContent = planState ? PILL_PLAN[planState] : "";
+  $("#plan").innerHTML = u.windows.length ? u.windows.map((w, i) => `
+    <div class="win ${ps[i]}">
+      <div class="win-h">
+        <span class="lbl">${esc(w.label)}</span>
+        <span class="rst">reseta em <b>${until(w.resets_at)}</b> · ${clock(w.resets_at)}</span>
+        <span class="wpct">${w.pct.toFixed(0)}%</span>
+      </div>
+      <div class="bar"><i style="width:${Math.min(100, w.pct)}%"></i></div>
+    </div>`).join("") : `<div class="note warn">Limites indisponíveis no momento.</div>`;
+  $("#plan-note").innerHTML = `<span class="dot ${u.live && !u.err ? "live" : u.err ? "off" : ""}"></span>${esc(usageNote(u))}`;
+
+  // 3. conta e modelo
+  $("#acct-email").textContent = a.email;
+  $("#model-name").textContent = modelName(x);
+  $("#model-name").title = x.model;
+  $("#model-effort").innerHTML = x.effort ? `<span class="chip">${esc(x.effort)}</span>` : "–";
+
+  // 4. veredito
+  const v = verdict(p, worst, x.limit - x.used);
+  const vs = worstOf(v.map((r) => r[0]));
+  setState($("#b-verdict"), vs);
+  $("#verdict-pill").textContent = PILL_CTX[vs];
+  $("#verdict").innerHTML = v.map(([st, msg]) =>
+    `<div class="vrow ${st}"><span class="ico">${ICON[st]}</span><span>${esc(msg)}</span></div>`).join("");
+
+  // faixa de estado no topo da janela e título (aparece na barra de tarefas)
+  setState($("#main"), worstOf([cs, planState || "ok", vs]));
+  document.title = (p >= 80 ? "⚠ " : "") + c.title + " · " + p.toFixed(0) + "%";
+  fit();
+}
+
+// Ajusta a janela ao conteúdo, sem passar de metade da altura útil da tela
+// (para empilhar duas janelas, uma em cima da outra). Se você redimensionar
+// ou encaixar a janela à mão, para de mexer.
+let fitted = null;
+function fit() {
+  if (fitted && (Math.abs(innerWidth - fitted.w) > 3 || Math.abs(innerHeight - fitted.h) > 3)) return;
+  const cw = outerWidth - innerWidth, ch = outerHeight - innerHeight;
+  const maxH = Math.floor(screen.availHeight / 2) - ch;
+  // 2x2 cabe em telas normais; em telas baixas usa 4 colunas lado a lado
+  const w = fitted ? fitted.w : Math.min(maxH >= 400 ? 720 : 940, screen.availWidth - cw);
+  try {
+    if (Math.abs(innerWidth - w) > 3) {            // muda a largura primeiro; o layout reflui
+      resizeTo(w + cw, outerHeight);
+      setTimeout(fit, 150);
+      return;
+    }
+    const h = Math.min(Math.ceil($("#main").scrollHeight), maxH);
+    if (fitted && fitted.h === h) return;
+    resizeTo(w + cw, h + ch);
+    fitted = { w, h };
+  } catch { /* o navegador pode recusar */ }
+}
+
+async function tick() {
+  try { render(await api("/api/chat?id=" + encodeURIComponent(id))); $("#conn").className = "dot live"; }
+  catch { $("#conn").className = "dot off"; $("#conn").title = "servidor offline — reabra o ccwatch"; }
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
