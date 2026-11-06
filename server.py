@@ -21,7 +21,11 @@ import core
 
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))   # _MEIPASS: dentro do .exe
 WEB = os.path.join(BASE, "web")
-DATA = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "ccwatch")          # log e perfil do navegador
+if sys.platform == "darwin":
+    _APPDATA = os.path.expanduser("~/Library/Application Support")
+else:
+    _APPDATA = os.environ.get("LOCALAPPDATA", BASE)
+DATA = os.path.join(_APPDATA, "ccwatch")                                      # log e perfil do navegador
 PORT = int(os.environ.get("CCWATCH_PORT", 8765))
 HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 IDLE_EXIT = 180          # segundos sem nenhuma janela consultando a API
@@ -63,6 +67,14 @@ def log(msg):
 # ---------- janelas ----------
 
 def find_browser():
+    if sys.platform == "darwin":
+        home = os.path.expanduser("~")
+        for app in ("Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"):
+            for base in ("/Applications", os.path.join(home, "Applications")):
+                p = os.path.join(base, app + ".app", "Contents", "MacOS", app)
+                if os.path.exists(p):
+                    return p
+        return None
     local = os.environ.get("LOCALAPPDATA", "")
     pf = os.environ.get("ProgramFiles", r"C:\Program Files")
     pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")

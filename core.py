@@ -16,6 +16,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -392,7 +393,10 @@ def fetch_usage_api():
 
 
 # Último valor bom fica no disco: ao reiniciar (ou se a API limitar), mostra o que já se sabia.
-STATE_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or HOME, "ccwatch")
+if sys.platform == "darwin":
+    STATE_DIR = os.path.join(HOME, "Library", "Application Support", "ccwatch")
+else:
+    STATE_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or HOME, "ccwatch")
 USAGE_FILE = os.path.join(STATE_DIR, "usage.json")
 LIVE_MAX_AGE = 150          # acima disso o dado deixa de ser "ao vivo"
 
