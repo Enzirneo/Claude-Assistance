@@ -18,13 +18,13 @@ Sem dependências em tempo de execução. Só lê arquivos locais do Claude Code
 
 ## Requisitos
 
-- Windows com **Edge** ou **Chrome** (as janelas são abertas em modo app).
-- **Python 3.10+** (para rodar do código ou gerar o `.exe`).
+- **Windows** com Edge ou Chrome, ou **macOS** com Chrome, Edge, Brave ou Chromium (as janelas são abertas em modo app).
+- **Python 3.10+** (para rodar do código ou gerar o `.exe`). No macOS, o `python3` do sistema (3.9) funcionou nos testes.
 - Claude Code instalado e com login feito.
 
 ## Usar
 
-Rodar direto do código:
+Rodar direto do código (Windows: `python server.py`; macOS: `python3 server.py`):
 
 ```
 python server.py
@@ -38,6 +38,20 @@ build.bat
 
 Isso cria `ccwatch.exe` na raiz, com ícone próprio. É só abrir (ou criar um atalho para ele).
 O `.exe` não vai para o git; gere de novo em cada máquina.
+
+### macOS
+
+Duplo clique em `ccwatch.command` (abre com Terminal), ou gere um app com ícone, sem Terminal:
+
+```
+./build_mac.sh
+```
+
+Isso cria `ccwatch.app` na raiz, com o ícone de `icon.ico`. Ele não aparece no Dock; só as janelas.
+Pode arrastar para Aplicativos: o app guarda o caminho do projeto (se mover a pasta, gere de novo).
+Na primeira vez, se o macOS bloquear, clique com o botão direito no app, **Abrir** e confirme.
+O token do plano é lido do Keychain quando não existe `~/.claude/.credentials.json`.
+Log, perfil do navegador e cache ficam em `~/Library/Application Support/ccwatch`.
 
 - **Hub:** lista todos os chats (contexto, tokens, modelo, gasto e atividade). Clique em um
   para abrir a janela dele.
@@ -54,7 +68,9 @@ server.py      servidor HTTP local (127.0.0.1:8765) + abertura das janelas
 core.py        leitura dos transcripts, contexto, gasto acumulado e uso do plano
 web/           interface (index.html = hub, chat.html = janela de chat)
 icon.ico       ícone do .exe e do atalho
-build.bat      gera o ccwatch.exe com PyInstaller
+build.bat      gera o ccwatch.exe com PyInstaller (Windows)
+build_mac.sh   gera o ccwatch.app (macOS)
+ccwatch.command  launcher com Terminal (macOS)
 ccwatch_terminal.py   versão original para terminal
 ```
 
