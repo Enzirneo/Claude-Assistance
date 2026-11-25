@@ -153,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
             chat = core.find_chat(str(chat_id))
             if not chat:
                 return self._json({"error": "chat não encontrado"}, 404)
-            ok = open_window(f"/chat.html?id={chat['id']}", (720, 440))
+            ok = open_window(f"/chat.html?id={chat['id']}", (640, 440))
         else:
             ok = open_window("/", (1040, 640))
         return self._json({"ok": ok})
@@ -164,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/chats":
             return self._json({"ready": state["ready"], "now": time.time(),
                                "chats": state["chats"],
-                               "account": core.account(), "usage": core.scan_usage()})
+                               "account": core.account(), "usage": core.scan_usage(history=True),
+                               "activity": core.activity()})
         if url.path == "/api/chat":
             chat_id = (parse_qs(url.query).get("id") or [""])[0]
             chat = core.find_chat(chat_id)

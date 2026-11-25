@@ -11,6 +11,7 @@ Diferenças para o script de terminal:
   - nada de ANSI: tudo devolve dicts prontos para JSON
 """
 
+import datetime
 import getpass
 import json
 import os
@@ -178,6 +179,41 @@ def _read_tail_lines(path):
 _totals = {}
 
 
+def _epoch(iso):
+    try:
+        return datetime.datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+_act_cache = {"at": 0.0, "val": None}
+
+
+def activity():
+    """Tokens por período (somando todos os chats): 24h de hora em hora e 7d de 6 em 6h."""
+    now = time.time()
+    if _act_cache["val"] and now - _act_cache["at"] < 10:
+        return _act_cache["val"]
+    off = time.localtime().tm_gmtoff or 0
+    res = {}
+    with _lock:
+        msgs = [m for s in _totals.values() for m in s["msgs"].values()]
+    for hours, step in ((24, 3600), (168, 21600)):
+        n = hours * 3600 // step
+        first = (int((now + off) // step) - n + 1) * step - off
+        buckets = [{"t": first + i * step, "new": 0, "out": 0} for i in range(n)]
+        for m in msgs:
+            if len(m) < 4 or m[3] < first:
+                continue
+            i = int((m[3] - first) // step)
+            if 0 <= i < n:
+                buckets[i]["new"] += m[0]
+                buckets[i]["out"] += m[2]
+        res[str(hours)] = {"step": step, "buckets": buckets}
+    _act_cache.update(at=now, val=res)
+    return res
+
+
 def scan_totals(path):
     """Gasto acumulado do chat inteiro. Lê só os bytes novos desde a última vez."""
     try:
@@ -217,6 +253,7 @@ def scan_totals(path):
                         (u.get("input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0),
                         u.get("cache_read_input_tokens") or 0,
                         u.get("output_tokens") or 0,
+                        _epoch(d.get("timestamp")),
                     )
         vals = s["msgs"].values()
         return {
@@ -424,8 +461,50 @@ def _save(util, at):
         pass
 
 
+HIST_FILE = os.path.join(STATE_DIR, "usage_history.json")
+HIST_STEP = 300            # uma amostra a cada 5 min
+HIST_KEEP = 8 * 86400      # guarda 8 dias
+_hist = []
+_hist_lock = threading.Lock()
+
+
+def _load_hist():
+    try:
+        with open(HIST_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        with _hist_lock:
+            _hist[:] = [r for r in data if isinstance(r, dict) and "t" in r]
+    except Exception:
+        pass
+
+
+def _record_hist(util, at):
+    row = {"t": at}
+    for key, _ in WINDOWS:
+        w = util.get(key)
+        if isinstance(w, dict) and w.get("utilization") is not None:
+            row[key] = float(w["utilization"])
+    with _hist_lock:
+        if _hist and at - _hist[-1]["t"] < HIST_STEP:
+            return
+        _hist.append(row)
+        _hist[:] = [r for r in _hist if at - r["t"] <= HIST_KEEP]
+        snap = list(_hist)
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(HIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(snap, f)
+    except OSError:
+        pass
+
+
 def _usage_worker():
     _load_saved()
+    _load_hist()
+    with _live_lock:
+        util, at = _live["util"], _live["at"]
+    if util is not None:
+        _record_hist(util, at)
     fails = 0
     while True:
         with _live_lock:
@@ -440,6 +519,7 @@ def _usage_worker():
             with _live_lock:
                 _live["util"], _live["at"], _live["err"] = util, now, None
             _save(util, now)
+            _record_hist(util, now)
         else:
             fails += 1
             wait = retry or min(300, USAGE_REFRESH * 2 ** (fails - 1))   # recua a cada falha
@@ -465,15 +545,20 @@ def _build_windows(util):
     return out
 
 
-def scan_usage():
+def _history():
+    with _hist_lock:
+        return list(_hist)
+
+
+def scan_usage(history=False):
     with _live_lock:
         util, at, err, nxt = _live["util"], _live["at"], _live["err"], _live["next"]
     retry_in = max(0, nxt - time.time()) if err and nxt else None
     if util is not None:
         age = time.time() - at
         return {"age": age, "windows": _build_windows(util), "live": age < LIVE_MAX_AGE,
-                "err": err, "retry_in": retry_in}
+                "err": err, "retry_in": retry_in, "history": _history() if history else []}
     cu = load_cfg().get("cachedUsageUtilization") or {}
     age = time.time() - cu["fetchedAtMs"] / 1000.0 if cu.get("fetchedAtMs") else None
     return {"age": age, "windows": _build_windows(cu.get("utilization") or {}),
-            "live": False, "err": err, "retry_in": retry_in}
+            "live": False, "err": err, "retry_in": retry_in, "history": _history() if history else []}

@@ -60,3 +60,38 @@ function usageNote(usage) {
 }
 
 function modelName(ctx) { return ctx.model_name || ctx.model; }
+
+/* ---------- tema (claro/escuro) e barra de título própria ---------- */
+const THEME_KEY = "ccwatch-theme";
+function systemTheme() { return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; }
+function applyTheme() {
+  let t = null;
+  try { t = localStorage.getItem(THEME_KEY); } catch {}
+  document.documentElement.dataset.theme = t || systemTheme();
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.content = document.documentElement.dataset.theme === "light" ? "#eef1f7" : "#0b0d13";
+}
+applyTheme();
+addEventListener("storage", applyTheme);
+
+const ICONS = {
+  sun: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"/></svg>',
+  moon: '<svg viewBox="0 0 16 16"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/></svg>',
+};
+
+// botão de tema dentro de um contêiner da página
+function mountThemeButton(host) {
+  const b = document.createElement("button");
+  b.className = "theme-btn";
+  b.title = "Alternar tema claro/escuro";
+  const paint = () => { b.innerHTML = document.documentElement.dataset.theme === "light" ? ICONS.moon : ICONS.sun; };
+  b.onclick = () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    try { localStorage.setItem(THEME_KEY, next); } catch {}
+    applyTheme(); paint();
+    document.dispatchEvent(new Event("themechange"));
+  };
+  paint();
+  addEventListener("storage", () => { paint(); document.dispatchEvent(new Event("themechange")); });
+  host.appendChild(b);
+}
