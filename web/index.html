@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0d13">
 <title>ccwatch</title>
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
 </head>
 <body class="hub">
 <div class="top">
@@ -13,46 +15,170 @@
   <span class="brand">cc<b>watch</b></span>
   <span class="acct" id="acct"></span>
   <span class="sp"></span>
-  <input type="search" id="q" placeholder="buscar…">
+  <span class="note" id="unote"></span>
+  <span id="theme-host"></span>
 </div>
-<div class="strip lims" id="limits"></div>
-<div class="cols">
-  <span></span><span>Chat <span id="count"></span></span><span class="p">Projeto</span><span>Contexto</span>
-  <span class="r t">Tokens</span><span class="m">Modelo</span><span class="s" title="↑ entrada nova · c leitura de cache · ↓ saída">Gasto ↑ c ↓</span><span class="r">Ativ.</span>
+
+<section class="dash">
+  <div class="gauges" id="gauges"></div>
+  <div class="card stats" id="stats"></div>
+  <div class="card chart-card">
+    <h2><span>Atividade <span class="sub" id="csub"></span></span>
+      <span class="seg" id="range"><button data-h="24" class="on">24h</button><button data-h="168">7d</button></span></h2>
+    <div id="chart"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+</section>
+
+<div class="listbar">
+  <h2>Conversas <span id="count"></span></h2>
+  <input type="search" id="q" placeholder="buscar…">
 </div>
 <div id="list"></div>
 <div class="empty" id="empty" hidden></div>
 
-<script src="common.js"></script>
+
 <script>
+mountThemeButton($("#theme-host"));
 const list = $("#list"), rows = new Map();
-let data = null, order = "", filter = "";
+let data = null, order = "", filter = "", rangeH = "24";
 
 $("#q").addEventListener("input", (e) => { filter = e.target.value.trim().toLowerCase(); render(); });
 list.addEventListener("click", (e) => {
   const row = e.target.closest(".row-chat");
   if (row) openWindow(row.dataset.id);
 });
+$("#range").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  rangeH = b.dataset.h;
+  document.querySelectorAll("#range button").forEach((x) => x.classList.toggle("on", x === b));
+  if (data) drawChart();
+});
+addEventListener("resize", () => data && drawChart());
+document.addEventListener("themechange", () => data && drawChart());
 
+/* ---------- cards de limite do plano ---------- */
+function clock(iso) {
+  const t = new Date(iso); if (isNaN(t)) return "";
+  const far = t - Date.now() > 86400000;
+  return t.toLocaleString("pt-BR", far ? { weekday: "short", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit" }).replace(/[.,]/g, "");
+}
+
+function gauge(w) {
+  const p = Math.min(100, w.pct), R = 40, C = 2 * Math.PI * R, st = state(w.pct, 70, 90);
+  return `<div class="card gauge ${st}">
+    <svg viewBox="0 0 100 100" class="ring"><circle cx="50" cy="50" r="${R}" class="trk"/>
+      <circle cx="50" cy="50" r="${R}" class="val" stroke-dasharray="${(C * p / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 50 50)"/>
+      <text x="50" y="58" text-anchor="middle">${w.pct.toFixed(0)}%</text></svg>
+    <div class="g-lbl">${esc(w.label)}</div>
+    <div class="g-big">${until(w.resets_at)}</div>
+    <div class="g-sub">até resetar${w.resets_at ? " · " + clock(w.resets_at) : ""}</div></div>`;
+}
+
+/* ---------- gráfico: tokens por período + linha do % da sessão ---------- */
+let chartKey = "";
+function drawChart() {
+  const act = data.activity && data.activity[rangeH];
+  const box = $("#chart");
+  if (!act) { box.innerHTML = ""; return; }
+  const W = Math.max(320, box.clientWidth), H = Math.max(190, box.clientHeight);
+  const key = [document.documentElement.dataset.theme, rangeH, W, H, JSON.stringify(act.buckets), (data.usage.history || []).length].join("|");
+  if (key === chartKey) return;                  // nada mudou: não redesenha (mantém o tooltip)
+  chartKey = key;
+  const L = 38, R = 38, T = 10, B = 22, bs = act.buckets;
+  const t0 = bs[0].t, t1 = bs[bs.length - 1].t + act.step;
+  const vals = bs.map((b) => b.new + b.out);
+  const total = vals.reduce((a, b) => a + b, 0);
+  let max = Math.max(...vals, 1);
+  const nice = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); const f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; };
+  max = nice(max);
+  const x = (t) => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const y = (v) => T + (1 - v / max) * (H - T - B);
+  const yp = (p) => T + (1 - p / 100) * (H - T - B);
+  const bw = (W - L - R) / bs.length;
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = max * i / 4;
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${k(Math.round(v))}</text>`
+      + `<text x="${W - R + 6}" y="${y(v) + 3}">${i * 25}%</text>`;
+  }
+  const every = rangeH === "24" ? 4 : 4;
+  let bars = "";
+  bs.forEach((b, i) => {
+    const v = vals[i], h = Math.max(v ? 2 : 0, (H - T - B) - (y(v) - T)), bx = x(b.t) + bw * 0.16, w = bw * 0.68;
+    const d = new Date(b.t * 1000);
+    const lab = rangeH === "24" ? d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+      : d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit" }).replace(".", "") + " " + d.getHours() + "h";
+    if (i % every === 0) g += `<text x="${bx + w / 2}" y="${H - 5}" text-anchor="middle">${rangeH === "24" ? d.getHours() + "h" : d.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", "")}</text>`;
+    const outH = v ? h * (b.out / v) : 0;
+    bars += `<g class="col" data-i="${i}" data-x="${bx + w / 2}" data-y="${y(v)}" data-l="${esc(lab)}" data-n="${b.new}" data-o="${b.out}">
+      <rect x="${x(b.t)}" y="${T}" width="${bw}" height="${H - T - B}" fill="transparent"/>
+      <rect class="b" x="${bx}" y="${H - B - h}" width="${w}" height="${h}" rx="${Math.min(6, w / 2.2)}" fill="url(#gb)"/>
+      ${outH > 1 ? `<rect class="b" x="${bx}" y="${H - B - outH}" width="${w}" height="${outH}" rx="${Math.min(6, w / 2.2)}" fill="url(#gv)"/>` : ""}</g>`;
+  });
+  // linha do % da sessão de 5h (histórico coletado pelo app)
+  const hist = (data.usage.history || []).filter((r) => r.five_hour != null && r.t >= t0);
+  let line = "";
+  if (hist.length > 1) {
+    const pts = hist.map((r) => [x(Math.min(r.t, t1)), yp(r.five_hour)]);
+    let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {                 // curva suave (Catmull-Rom)
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      d += `C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    const base = H - B;
+    line = `<path class="area" d="${d}L${pts[pts.length - 1][0].toFixed(1)} ${base}L${pts[0][0].toFixed(1)} ${base}Z"/><path class="line" d="${d}"/>`;
+  }
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+    <defs><linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--bar-a)"/><stop offset="1" style="stop-color:var(--bar-b)"/></linearGradient>
+    <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--out-a)"/><stop offset="1" style="stop-color:var(--out-b)"/></linearGradient></defs>
+    ${g}${line}${bars}</svg><div class="tip" id="tip" hidden></div>`;
+  $("#csub").textContent = total ? `· ${k(total)} tokens em ${rangeH === "24" ? "24h" : "7 dias"}` : "· sem uso no período";
+  $("#legend").innerHTML = `<span title="O que você, os arquivos e as ferramentas mandaram para o Claude (sem contar o que já estava em cache)"><i style="background:var(--bar-b)"></i>Enviado ao Claude</span><span title="O que o Claude respondeu e escreveu"><i style="background:var(--out-b)"></i>Escrito pelo Claude</span>`
+    + (hist.length > 1 ? `<span><i style="background:var(--warn)"></i>% da sessão (5h)</span>` : `<span class="faint">linha do % da sessão aparece conforme o app coleta (a cada 5 min)</span>`);
+  const tip = $("#tip");
+  box.querySelectorAll(".col").forEach((c) => {
+    c.addEventListener("mouseenter", () => {
+      tip.hidden = false;
+      tip.innerHTML = `${c.dataset.l}<br><b>${k(+c.dataset.n)}</b> enviados ao Claude<br><b>${k(+c.dataset.o)}</b> escritos pelo Claude`;
+      tip.style.left = Math.min(Math.max(+c.dataset.x, 80), W - 80) + "px";
+      tip.style.top = Math.max(+c.dataset.y - 8, 44) + "px";
+    });
+    c.addEventListener("mouseleave", () => { tip.hidden = true; });
+  });
+}
+
+function renderDash(chats, usage, now) {
+  $("#gauges").innerHTML = usage.windows.length
+    ? usage.windows.slice(0, 2).map(gauge).join("")
+    : `<div class="card gauge"><div class="g-lbl">Limites do plano</div><div class="g-sub">indisponíveis no momento</div></div>`;
+  const live = chats.filter((c) => now - c.mtime < 90).length;
+  const risk = chats.filter((c) => c.ctx.pct >= 80).length;
+  const st = (v, l, cls = "") => `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`;
+  $("#stats").innerHTML = st(live, "ativos agora", live ? "ok" : "") + st(risk, "contexto ≥ 80%", risk ? "bad" : "")
+    + st(chats.length, "conversas") + st(chats.filter((c) => now - c.mtime < 86400).length, "nas últimas 24h");
+  $("#unote").textContent = usageNote(usage);
+}
+
+/* ---------- lista ---------- */
 function rowHtml(c, now) {
-  const x = c.ctx, p = x.pct, idle = now - c.mtime;
-  const t = c.totals;
+  const x = c.ctx, p = x.pct, idle = now - c.mtime, t = c.totals;
+  const proj = c.cwd.split(/[\\/]/).filter(Boolean).pop() || c.cwd;
   return `
     <span class="dot ${idle < 90 ? "live" : ""}"></span>
-    <span class="name" title="${esc(c.title)}\n${esc(c.cwd)}">${esc(c.title)}</span>
-    <span class="proj" title="${esc(c.cwd)}">${esc(c.cwd.split(/[\\/]/).filter(Boolean).pop() || c.cwd)}</span>
-    <span class="ctx ${state(p, 60, 80)}"><span class="bar"><i style="width:${Math.min(100, p)}%"></i></span><span class="pct">${p.toFixed(0)}%</span></span>
-    <span class="tok num r">${k(x.used)}<i class="faint">/${k(x.limit)}</i></span>
-    <span class="model">${esc(modelName(x))}</span>
-    <span class="spend num"><i>↑</i><b>${k(t.new_in)}</b><i>c</i><b>${k(t.cache_read)}</b><i>↓</i><b>${k(t.out)}</b></span>
-    <span class="muted num r">${ago(idle)}</span>`;
+    <span class="who"><div class="name" title="${esc(c.title)}">${esc(c.title)}</div><div class="proj" title="${esc(c.cwd)}">${esc(proj)}</div></span>
+    <span class="ctx ${state(p, 60, 80)}"><span class="l"><span>${k(x.used)} / ${k(x.limit)}</span><span class="pct">${p.toFixed(0)}%</span></span><span class="bar"><i style="width:${Math.min(100, p)}%"></i></span></span>
+    <span class="mod"><span class="chip">${esc(modelName(x))}</span></span>
+    <span class="tk" title="Enviado ao Claude: ${k(t.new_in)} · Escrito pelo Claude: ${k(t.out)} · Lido do cache: ${k(t.cache_read)}"><b>${k(t.new_in + t.out)}</b><span>tokens</span></span>
+    <span class="ago">${ago(idle)}</span>`;
 }
 
 function render() {
   if (!data) return;
   const { chats, now, account, usage } = data;
   $("#acct").textContent = account.email;
-  $("#limits").innerHTML = limitsInline(usage) + `<span class="faint" style="margin-left:auto;font-size:11px">${esc(usageNote(usage))}</span>`;
+  renderDash(chats, usage, now);
+  drawChart();
 
   const shown = chats.filter((c) => !filter || (c.title + " " + c.cwd).toLowerCase().includes(filter));
   const alerts = chats.filter((c) => c.ctx.pct >= 80).length;

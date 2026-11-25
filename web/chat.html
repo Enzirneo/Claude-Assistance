@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0d13">
 <title>ccwatch</title>
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
 </head>
 <body class="chat">
 <main id="main">
@@ -13,8 +15,12 @@
     <div class="ttl-text">
       <h1 id="title">…</h1>
     </div>
+    <span class="chip" id="model-chip"></span>
     <span class="dot" id="conn"></span>
+    <span id="theme-host"></span>
   </header>
+
+  <div class="body">
 
   <!-- 1. CONTEXTO -->
   <section class="blk" id="b-ctx">
@@ -52,10 +58,12 @@
     <h2><span>Veredito</span><span class="pill" id="verdict-pill"></span></h2>
     <div id="verdict"></div>
   </section>
+  </div>
 </main>
 
-<script src="common.js"></script>
+
 <script>
+mountThemeButton($("#theme-host"));
 const id = new URLSearchParams(location.search).get("id");
 const RANK = { ok: 0, warn: 1, bad: 2 };
 const ICON = { ok: "✓", warn: "!", bad: "✕" };
@@ -103,7 +111,7 @@ function render(d) {
   $("#ctx-used").innerHTML = `<b>${k(x.used)}</b> <span>de ${k(x.limit)} tokens</span>`;
   $("#ctx-free").innerHTML = `livre <b>${k(Math.max(0, x.limit - x.used))}</b>`;
   const ago_ = x.last_ts ? " · " + ago((Date.now() - new Date(x.last_ts).getTime()) / 1000) + " atrás" : "";
-  $("#ctx-last").innerHTML = `<b>+${k(x.last_new)}</b> in · <b>${k(x.last_out)}</b> out<span class="faint">${ago_}</span>`;
+  $("#ctx-last").innerHTML = `<b>+${k(x.last_new)}</b> enviados · <b>${k(x.last_out)}</b> escritos<span class="faint">${ago_}</span>`;
 
   // 2. limites do plano
   const ps = u.windows.map((w) => state(w.pct, 70, 90));
@@ -127,6 +135,7 @@ function render(d) {
   $("#model-name").textContent = modelName(x);
   $("#model-name").title = x.model;
   $("#model-effort").innerHTML = x.effort ? `<span class="chip">${esc(x.effort)}</span>` : "–";
+  $("#model-chip").textContent = modelName(x) + (x.effort ? " · " + x.effort : "");
 
   // 4. veredito
   const v = verdict(p, worst, x.limit - x.used);
@@ -139,30 +148,6 @@ function render(d) {
   // faixa de estado no topo da janela e título (aparece na barra de tarefas)
   setState($("#main"), worstOf([cs, planState || "ok", vs]));
   document.title = (p >= 80 ? "⚠ " : "") + c.title + " · " + p.toFixed(0) + "%";
-  fit();
-}
-
-// Ajusta a janela ao conteúdo, sem passar de metade da altura útil da tela
-// (para empilhar duas janelas, uma em cima da outra). Se você redimensionar
-// ou encaixar a janela à mão, para de mexer.
-let fitted = null;
-function fit() {
-  if (fitted && (Math.abs(innerWidth - fitted.w) > 3 || Math.abs(innerHeight - fitted.h) > 3)) return;
-  const cw = outerWidth - innerWidth, ch = outerHeight - innerHeight;
-  const maxH = Math.floor(screen.availHeight / 2) - ch;
-  // 2x2 cabe em telas normais; em telas baixas usa 4 colunas lado a lado
-  const w = fitted ? fitted.w : Math.min(maxH >= 400 ? 720 : 940, screen.availWidth - cw);
-  try {
-    if (Math.abs(innerWidth - w) > 3) {            // muda a largura primeiro; o layout reflui
-      resizeTo(w + cw, outerHeight);
-      setTimeout(fit, 150);
-      return;
-    }
-    const h = Math.min(Math.ceil($("#main").scrollHeight), maxH);
-    if (fitted && fitted.h === h) return;
-    resizeTo(w + cw, h + ch);
-    fitted = { w, h };
-  } catch { /* o navegador pode recusar */ }
 }
 
 async function tick() {
